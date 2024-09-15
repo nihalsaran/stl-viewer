@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STL File Viewer and Analyzer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #stl-viewer {
+            width: 100%;
+            height: 400px;
+            border: 1px solid #ccc;
+        }
+        #file-info {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>STL File Viewer and Analyzer</h1>
+    <input type="file" id="stl-input" accept=".stl">
+    <div id="stl-viewer"></div>
+    <div id="file-info">
+        <p>Material Volume: <span id="volume"></span></p>
+        <p>Model Dimensions: <span id="dimensions"></span></p>
+        <p>Estimated Print Time: <span id="print-time"></span></p>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    <script>
+        const input = document.getElementById('stl-input');
+        const viewer = document.getElementById('stl-viewer');
+        const volumeSpan = document.getElementById('volume');
+        const dimensionsSpan = document.getElementById('dimensions');
+        const printTimeSpan = document.getElementById('print-time');
+
+        let scene, camera, renderer, mesh;
+
+        function initViewer() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, viewer.clientWidth / viewer.clientHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer();
+            renderer.setSize(viewer.clientWidth, viewer.clientHeight);
+            renderer.setClearColor(0xffffff, 1);
+            viewer.appendChild(renderer.domElement);
+
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(1, 1, 1).normalize();
+            scene.add(light);
+
+            camera.position.z = 5;
+        }
+
+        function loadSTL(file) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const loader = new THREE.STLLoader();
+                const geometry = loader.parse(event.target.result);
+                
+                if (mesh) scene.remove(mesh);
+                
+                const material = new THREE.MeshPhongMaterial({color: 0xaaaaaa, specular: 0x111111, shininess: 200});
+                mesh = new THREE.Mesh(geometry, material);
+                scene.add(mesh);
+
+                // Center the model
+                geometry.computeBoundingBox();
+                const center = geometry.boundingBox.getCenter(new THREE.Vector3());
+                mesh.position.sub(center);
+
+                // Adjust camera
+                const box = new THREE.Box3().setFromObject(mesh);
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                camera.position.z = maxDim * 2;
+
+                // Calculate and display file info
+                const volume = calculateVolume(geometry);
+                const dimensions = calculateDimensions(geometry);
+                const printTime = estimatePrintTime(volume);
+
+                volumeSpan.textContent = (volume / 1000).toFixed(2) + ' cm³';
+                dimensionsSpan.textContent = `${dimensions.x.toFixed(2)} x ${dimensions.y.toFixed(2)} x ${dimensions.z.toFixed(2)} mm`;
+                printTimeSpan.textContent = formatPrintTime(printTime);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function calculateVolume(geometry) {
+            let volume = 0;
+            const positions = geometry.getAttribute('position').array;
+            
+            for (let i = 0; i < positions.length; i += 9) {
+                const triangle = [
+                    [positions[i], positions[i+1], positions[i+2]],
+                    [positions[i+3], positions[i+4], positions[i+5]],
+                    [positions[i+6], positions[i+7], positions[i+8]]
+                ];
+                volume += signedVolumeOfTriangle(triangle);
+            }
+            
+            return Math.abs(volume);
+        }
+
+        function signedVolumeOfTriangle(triangle) {
+            const [a, b, c] = triangle;
+            return (1/6) * (-a[2] * b[1] * c[0] + a[1] * b[2] * c[0] + a[2] * b[0] * c[1] - a[0] * b[2] * c[1] - a[1] * b[0] * c[2] + a[0] * b[1] * c[2]);
+        }
+
+        function calculateDimensions(geometry) {
+            geometry.computeBoundingBox();
+            const box = geometry.boundingBox;
+            return {
+                x: box.max.x - box.min.x,
+                y: box.max.y - box.min.y,
+                z: box.max.z - box.min.z
+            };
+        }
+
+        function estimatePrintTime(volume) {
+            // This is a very rough estimate. Adjust the factor based on your printer's speed.
+            const printSpeedFactor = 0.5; // cm³ per minute
+            return volume / printSpeedFactor / 1000; // convert to minutes
+        }
+
+        function formatPrintTime(minutes) {
+            const hours = Math.floor(minutes / 60);
+            const mins = Math.floor(minutes % 60);
+            const secs = Math.floor((minutes * 60) % 60);
+            return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (mesh) mesh.rotation.y += 0.01;
+            renderer.render(scene, camera);
+        }
+
+        input.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) loadSTL(file);
+        });
+
+        initViewer();
+        animate();
+    </script>
+</body>
+</html>
